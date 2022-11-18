@@ -1,3 +1,3 @@
 #!/bin/bash
 
-gcc -lOpenCL main.c -o a.out
+gcc -g -lOpenCL -Wall -Werror main.c -o a.out
