@@ -36,7 +36,6 @@ typedef enum {
     ECL_ERROR_DEVICE_NOT_AVAILABLE,
     ECL_ERROR_LOAD_PROGRAM,
     ECL_ERROR_ALLOCATE_BUFFER,
-    ECL_ERROR_BUFFER_NOT_CREATED,
     ECL_ERROR_BUFFER_NOT_SENDED,
     ECL_ERROR_CREATE_PROGRAM,
     ECL_ERROR_BUILD_PROGRAM,
@@ -222,8 +221,8 @@ EclError_t _eclGetDeviceByID(cl_device_id id, EclDevice_t* out) {
 }
 
 EclError_t _eclGetDevicesByType(EclDeviceType_t type, EclPlatform_t* platform) {
-    EclDevice_t* out;
-    size_t* outSize;
+    EclDevice_t* out = NULL;
+    size_t* outSize = NULL;
     _eclGetDevicesArrayByType(type, platform, &out, &outSize);
 
     // get devices count
@@ -288,15 +287,15 @@ EclError_t eclGetPlatform(size_t id, EclPlatform_t* out) {
 }
 
 size_t eclGetDevicesCount(EclDeviceType_t type, EclPlatform_t* platform) {
-    size_t* count;
+    size_t* count = NULL;
     _eclGetDevicesArrayByType(type, platform, NULL, &count);
 
     return *count;
 }
 
 EclError_t eclGetDevice(size_t id, EclDeviceType_t type, EclPlatform_t* platform, EclDevice_t** out) {
-    size_t* count;
-    EclDevice_t* devices;
+    size_t* count = NULL;
+    EclDevice_t* devices = NULL;
     _eclGetDevicesArrayByType(type, platform, &devices, &count);
 
     if(id >= *count) return ECL_ERROR_NO_DEVICE;
@@ -326,47 +325,49 @@ EclError_t eclComputer(size_t devID, EclDeviceType_t type, EclPlatform_t* platfo
     return ECL_ERROR_OK;
 }
 
-bool _eclCheckBuffer(EclBuffer_t* arg, const EclComputer_t* comp, _EclBufferMap_t** e) {
+bool _eclCheckBuffer(EclBuffer_t* arg, const EclComputer_t* comp, cl_mem* out) {
     for(size_t i = 0; i < arg->_bufSize; i++) {
         if(arg->_buf[i]._ctx == comp->_ctx) {
-            *e = &arg->_buf[i];
+            if(out) *out = arg->_buf[i]._mem;
             return true;
         }
     }
     return false;
 }
 
-bool _eclCheckProgram(EclProgram_t* prog, const EclComputer_t* comp, _EclProgramMap_t** e) {
+bool _eclCheckProgram(EclProgram_t* prog, const EclComputer_t* comp, cl_program* out) {
     for(size_t i = 0; i < prog->_progSize; i++) {
         if(prog->_prog[i]._ctx == comp->_ctx) {
-            *e = &prog->_prog[i];
+            if(out) *out = prog->_prog[i]._prog;
             return true;
         }
     }
     return false;
 }
 
-bool _eclCheckKernel(EclKernel_t* kern, const _EclProgramMap_t* progE, _EclKernelMap_t** e) {
+bool _eclCheckKernel(EclKernel_t* kern, cl_program prog, cl_kernel* out) {
     for(size_t i = 0; i < kern->_kernSize; i++) {
-        if(kern->_kern[i]._prog == progE->_prog) {
-            *e = &kern->_kern[i];
+        if(kern->_kern[i]._prog == prog) {
+            if(out) *out = kern->_kern[i]._kern;
             return true;
         }
     }
     return false;
 }
 
-EclError_t _eclCreateBuffer(EclBuffer_t* arg, const EclComputer_t* comp, _EclBufferMap_t** e) {
+EclError_t _eclCreateBuffer(EclBuffer_t* arg, const EclComputer_t* comp, cl_mem* out) {
     // check buffer
-    if(_eclCheckBuffer(arg, comp, e)) return ECL_ERROR_OK;
+    if(_eclCheckBuffer(arg, comp, out)) return ECL_ERROR_OK;
 
     // create buffer
     if(arg->_bufSize >= ECL_MAX_MAP_SIZE) return ECL_ERROR_ALLOCATE_BUFFER;
 
     cl_int err;
-    *e = &arg->_buf[arg->_bufSize++];
-    (*e)->_ctx = comp->_ctx;
-    (*e)->_mem = clCreateBuffer(comp->_ctx, (cl_mem_flags)arg->access, arg->size, NULL, &err);
+    _EclBufferMap_t* e = &arg->_buf[arg->_bufSize++];
+    e->_ctx = comp->_ctx;
+    e->_mem = clCreateBuffer(comp->_ctx, (cl_mem_flags)arg->access, arg->size, NULL, &err);
+
+    *out = e->_mem;
 
     if(err == CL_OUT_OF_HOST_MEMORY || err == CL_OUT_OF_RESOURCES) return ECL_ERROR_OUT_OF_MEMORY;
     if(err == CL_INVALID_BUFFER_SIZE || err == CL_MEM_OBJECT_ALLOCATION_FAILURE) return ECL_ERROR_ALLOCATE_BUFFER;
@@ -374,9 +375,9 @@ EclError_t _eclCreateBuffer(EclBuffer_t* arg, const EclComputer_t* comp, _EclBuf
     return ECL_ERROR_OK;
 }
 
-EclError_t _eclCreateProgram(EclProgram_t* prog, const EclComputer_t* comp, _EclProgramMap_t** e) {
+EclError_t _eclCreateProgram(EclProgram_t* prog, const EclComputer_t* comp, cl_program* out) {
     // check program
-    if(_eclCheckProgram(prog, comp, e)) return ECL_ERROR_OK;
+    if(_eclCheckProgram(prog, comp, out)) return ECL_ERROR_OK;
 
     // create program
     if(prog->_progSize >= ECL_MAX_MAP_SIZE) return ECL_ERROR_CREATE_PROGRAM;
@@ -386,12 +387,15 @@ EclError_t _eclCreateProgram(EclProgram_t* prog, const EclComputer_t* comp, _Ecl
 
     cl_int err = 0;
 
-    *e = &prog->_prog[prog->_progSize++];
-    (*e)->_ctx = comp->_ctx;
-    (*e)->_prog = clCreateProgramWithSource(comp->_ctx, 1, &src, &srcLen, &err);
+    _EclProgramMap_t* e = &prog->_prog[prog->_progSize++];
+    e->_ctx = comp->_ctx;
+    e->_prog = clCreateProgramWithSource(comp->_ctx, 1, &src, &srcLen, &err);
+
+    *out = e->_prog;
+
     if(err == CL_OUT_OF_HOST_MEMORY || err == CL_OUT_OF_RESOURCES) return ECL_ERROR_OUT_OF_MEMORY;
 
-    err = clBuildProgram((*e)->_prog, 0, NULL, NULL, NULL, NULL);
+    err = clBuildProgram(e->_prog, 0, NULL, NULL, NULL, NULL);
     if(err == CL_OUT_OF_HOST_MEMORY || err == CL_OUT_OF_RESOURCES) return ECL_ERROR_OUT_OF_MEMORY;
     if(err == CL_COMPILER_NOT_AVAILABLE) return ECL_ERROR_NO_COMPILER;
     if(err == CL_BUILD_PROGRAM_FAILURE) return ECL_ERROR_BUILD_PROGRAM;
@@ -399,35 +403,33 @@ EclError_t _eclCreateProgram(EclProgram_t* prog, const EclComputer_t* comp, _Ecl
     return ECL_ERROR_OK;
 }
 
-EclError_t _eclCreateKernel(EclKernel_t* kern, _EclProgramMap_t* progE, _EclKernelMap_t** e) {
+EclError_t _eclCreateKernel(EclKernel_t* kern, cl_program prog, cl_kernel* out) {
     // check kernel
-    if(_eclCheckKernel(kern, progE, e)) return ECL_ERROR_OK;
+    if(_eclCheckKernel(kern, prog, out)) return ECL_ERROR_OK;
 
     // create kernel
     if(kern->_kernSize >= ECL_MAX_MAP_SIZE) return ECL_ERROR_CREATE_KERNEL;
 
     cl_int err = 0;
 
-    *e = &kern->_kern[kern->_kernSize++];
-    (*e)->_prog = progE->_prog;
-    (*e)->_kern = clCreateKernel(progE->_prog, kern->name, &err);
+    _EclKernelMap_t* e = &kern->_kern[kern->_kernSize++];
+    e->_prog = prog;
+    e->_kern = clCreateKernel(prog, kern->name, &err);
+
+    *out = e->_kern;
+
     if(err == CL_OUT_OF_HOST_MEMORY || err == CL_OUT_OF_RESOURCES) return ECL_ERROR_OUT_OF_MEMORY;
     if(err == CL_INVALID_KERNEL_NAME) return ECL_ERROR_NO_KERNEL; 
 
     return ECL_ERROR_OK;
 }
 
-EclError_t _eclGetBufferEntry(EclBuffer_t* arg, const EclComputer_t* comp, _EclBufferMap_t** e) {
-    if(_eclCheckBuffer(arg, comp, e)) return ECL_ERROR_OK;
-    return ECL_ERROR_BUFFER_NOT_CREATED;
-}
-
 EclError_t eclComputerSend(EclBuffer_t* arg, const EclComputer_t* comp, EclComputerExec_t exec) {
-    _EclBufferMap_t* e = NULL;
-    EclError_t err = _eclCreateBuffer(arg, comp, &e);
+    cl_mem mem = 0;
+    EclError_t err = _eclCreateBuffer(arg, comp, &mem);
     if(err != ECL_ERROR_OK) return err;
 
-    int16_t tmpErr = clEnqueueWriteBuffer(comp->_queue, e->_mem, CL_FALSE, 0, arg->size, arg->data, 0, NULL, NULL);
+    int16_t tmpErr = clEnqueueWriteBuffer(comp->_queue, mem, CL_FALSE, 0, arg->size, arg->data, 0, NULL, NULL);
     if(tmpErr == CL_MEM_OBJECT_ALLOCATION_FAILURE) return ECL_ERROR_ALLOCATE_BUFFER;
 
     if(exec == ECL_EXEC_SYNC) {
@@ -439,27 +441,27 @@ EclError_t eclComputerSend(EclBuffer_t* arg, const EclComputer_t* comp, EclCompu
 
 EclError_t eclComputerGrid(EclFrame_t* frame, EclWorkSize_t global, EclWorkSize_t local, const EclComputer_t* comp, EclComputerExec_t exec) {
     // check program
-    _EclProgramMap_t* e = NULL;
-    EclError_t err = _eclCreateProgram(frame->prog, comp, &e);
+    cl_program prog = 0;
+    EclError_t err = _eclCreateProgram(frame->prog, comp, &prog);
     if(err != ECL_ERROR_OK) return err;
 
     // check kernel
-    _EclKernelMap_t* e2 = NULL;
-    err = _eclCreateKernel(frame->kern, e, &e2);
+    cl_kernel kern = 0;
+    err = _eclCreateKernel(frame->kern, prog, &kern);
     if(err != ECL_ERROR_OK) return err;
 
     // set args
     cl_int tmpErr = 0;
 
     for(size_t i = 0; i < frame->argsCount; i++) {
-        _EclBufferMap_t* e3 = NULL;
-        if(!_eclCheckBuffer(frame->args[i], comp, &e3)) return ECL_ERROR_BUFFER_NOT_SENDED;
+        cl_mem mem = 0;
+        if(!_eclCheckBuffer(frame->args[i], comp, &mem)) return ECL_ERROR_BUFFER_NOT_SENDED;
 
-        tmpErr = clSetKernelArg(e2->_kern, i, sizeof(cl_mem), &e3->_mem);
+        tmpErr = clSetKernelArg(kern, i, sizeof(cl_mem), &mem);
         if(tmpErr == CL_OUT_OF_HOST_MEMORY || tmpErr == CL_OUT_OF_RESOURCES) return ECL_ERROR_OUT_OF_MEMORY;
     }
 
-    tmpErr = clEnqueueNDRangeKernel(comp->_queue, e2->_kern, global.dim, NULL, global.sizes, local.sizes, 0, NULL, NULL);
+    tmpErr = clEnqueueNDRangeKernel(comp->_queue, kern, global.dim, NULL, global.sizes, local.sizes, 0, NULL, NULL);
 
     if(exec == ECL_EXEC_SYNC) {
         err = eclComputerAwait(comp);
@@ -470,18 +472,15 @@ EclError_t eclComputerGrid(EclFrame_t* frame, EclWorkSize_t global, EclWorkSize_
 }
 
 EclError_t eclComputerReceive(EclBuffer_t* arg, const EclComputer_t* comp, EclComputerExec_t exec) {
-    _EclBufferMap_t* e = NULL;
-    if(!_eclCheckBuffer(arg, comp, &e)) return ECL_ERROR_BUFFER_NOT_SENDED;
+    cl_mem mem = 0;
+    if(!_eclCheckBuffer(arg, comp, &mem)) return ECL_ERROR_BUFFER_NOT_SENDED;
 
-    EclError_t err = _eclGetBufferEntry(arg, comp, &e);
-    if(err != ECL_ERROR_OK) return err;
-
-    cl_int tmpErr;
-    out_of_memory_check(tmpErr, clEnqueueReadBuffer(comp->_queue, e->_mem, CL_FALSE, 0, arg->size, arg->data, 0, NULL, NULL));
+    cl_int err;
+    out_of_memory_check(err, clEnqueueReadBuffer(comp->_queue, mem, CL_FALSE, 0, arg->size, arg->data, 0, NULL, NULL));
 
     if(exec == ECL_EXEC_SYNC) {
-        err = eclComputerAwait(comp);
-        if(err != ECL_ERROR_OK) return err;
+        EclError_t tmpErr = eclComputerAwait(comp);
+        if(tmpErr != ECL_ERROR_OK) return tmpErr;
     }
 
     return ECL_ERROR_OK;
