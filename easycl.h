@@ -1,6 +1,7 @@
 #ifndef _EASYCL_H_
 #define _EASYCL_H_
 
+#include <stdio.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -9,8 +10,13 @@
 
 #define ECL_MAX_PLATFORMS_COUNT 32
 #define ECL_MAX_DEVICES_COUNT 32
-#define ECL_MAX_STRING_LEN 512
+
 #define ECL_MAX_WORKITEMS_DIMENSION 16
+
+#define ECL_MAX_STRING_LEN 512
+#define ECL_MAX_MAP_SIZE 32
+
+#define ECL_MAX_PROGRAM_LEN 2048
 
 // "_some" means "hidden from user"
 
@@ -24,7 +30,9 @@ typedef enum {
     ECL_ERROR_NO_PLATFORMS,
     ECL_ERROR_NO_PLATFORM,
     ECL_ERROR_NO_DEVICES,
-    ECL_ERROR_NO_DEVICE
+    ECL_ERROR_NO_DEVICE,
+    ECL_ERROR_DEVICE_NOT_AVAILABLE,
+    ECL_ERROR_LOAD_PROGRAM,
 } EclError_t;
 
 typedef enum {
@@ -66,12 +74,35 @@ typedef struct {
     EclDevice_t accel[ECL_MAX_DEVICES_COUNT];
 } EclPlatform_t;
 
+typedef struct {
+    const EclDevice_t* dev;
+    cl_context _ctx;
+    cl_command_queue _queue;
+} EclComputer_t;
+
+typedef struct {
+    cl_context _ctx;
+    cl_program _prog;
+} _EclProgramMap_t;
+
+
+typedef struct {
+    _EclProgramMap_t _prog[ECL_MAX_MAP_SIZE];
+    char src[ECL_MAX_PROGRAM_LEN];
+} EclProgram_t;
+
+
 EclError_t eclGetPlatformsCount(size_t* out);
 EclError_t eclGetPlatform(size_t id, EclPlatform_t* out);
 
 size_t eclGetDevicesCount(EclDeviceType_t type, EclPlatform_t* platform);
 EclError_t eclGetDevice(size_t id, EclDeviceType_t type, EclPlatform_t* platform, EclDevice_t** out);
 
+EclError_t eclComputer(size_t devID, EclDeviceType_t type, EclPlatform_t* platform, EclComputer_t* out);
+EclError_t eclReleaseComputer(EclComputer_t* comp);
+
+EclError_t eclProgramLoad(const char* filename, EclProgram_t* out);
+void eclProgram(const char* src, EclProgram_t* out);
 
 // additional wrappers
 #define out_of_memory_check(e, f)\
@@ -212,6 +243,62 @@ EclError_t eclGetDevice(size_t id, EclDeviceType_t type, EclPlatform_t* platform
     *out = &devices[id];
 
     return ECL_ERROR_OK;
+}
+
+EclError_t eclComputer(size_t devID, EclDeviceType_t type, EclPlatform_t* platform, EclComputer_t* out) {
+    // get device
+    EclDevice_t* dev = NULL;
+
+    EclError_t err = eclGetDevice(devID, type, platform, &dev);
+    if(err != ECL_ERROR_OK) return err;
+
+    out->dev = dev;
+
+    // create context and queue
+    cl_int tmpErr;
+    out->_ctx = clCreateContext(NULL, 1, &out->dev->_id, NULL, NULL, &tmpErr);
+    if(tmpErr == CL_DEVICE_NOT_AVAILABLE) return ECL_ERROR_DEVICE_NOT_AVAILABLE;
+    if(tmpErr == CL_OUT_OF_HOST_MEMORY || tmpErr == CL_OUT_OF_RESOURCES) return ECL_ERROR_OUT_OF_MEMORY;
+
+    out->_queue = clCreateCommandQueueWithProperties(out->_ctx, out->dev->_id, NULL, &tmpErr);
+    if(tmpErr == CL_OUT_OF_HOST_MEMORY || tmpErr == CL_OUT_OF_RESOURCES) return ECL_ERROR_OUT_OF_MEMORY;
+
+    return ECL_ERROR_OK;
+}
+
+EclError_t eclReleaseComputer(EclComputer_t* comp) {
+    cl_uint err;
+    out_of_memory_check(err, clReleaseContext(comp->_ctx));
+    out_of_memory_check(err, clReleaseCommandQueue(comp->_queue));
+
+    comp->_ctx = 0;
+    comp->_queue = 0;
+    comp->dev = NULL;
+
+    return ECL_ERROR_OK;
+}
+
+EclError_t eclProgramLoad(const char* name, EclProgram_t* out) {
+    size_t i = 0;
+    FILE* f = fopen(name, "r");
+
+    if(!f) return ECL_ERROR_LOAD_PROGRAM;
+
+    while(!feof(f)) {
+        if(i >= ECL_MAX_PROGRAM_LEN) {
+            fclose(f);
+            return ECL_ERROR_LOAD_PROGRAM;
+        }
+        out->src[i++] = fgetc(f);
+    }
+    out->src[--i] = '\0';
+    fclose(f);
+
+    return ECL_ERROR_OK;
+}
+
+void eclProgram(const char* src, EclProgram_t* out) {
+    strncpy(out->src, src, ECL_MAX_PROGRAM_LEN);
 }
 
 #endif // _EASY_CL_H_
