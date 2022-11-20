@@ -4,12 +4,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define CL_TARGET_OPENCL_VERSION 210
+#define CL_TARGET_OPENCL_VERSION 200
 #include "CL/cl.h"
 
 #define ECL_MAX_PLATFORMS_COUNT 32
 #define ECL_MAX_DEVICES_COUNT 32
 #define ECL_MAX_STRING_LEN 512
+#define ECL_MAX_WORKITEMS_DIMENSION 16
 
 // "_some" means "hidden from user"
 
@@ -33,9 +34,17 @@ typedef enum {
 } EclDeviceType_t;
 
 typedef struct {
+    EclDeviceType_t type;
+
     char name[ECL_MAX_STRING_LEN];
     char ext[ECL_MAX_STRING_LEN];
-    EclDeviceType_t type;
+    char ocl_ver[ECL_MAX_STRING_LEN];
+
+    size_t cu; // max compute units
+    size_t wrkgSize; // max workgroup size
+
+    size_t wrkiDim; // max workitems dimension
+    size_t wrkiSizes[ECL_MAX_WORKITEMS_DIMENSION];  // max workitems sizes
 
     cl_device_id _id;
 } EclDevice_t;
@@ -63,6 +72,13 @@ EclError_t eclGetPlatform(size_t id, EclPlatform_t* out);
 size_t eclGetDevicesCount(EclDeviceType_t type, EclPlatform_t* platform);
 EclError_t eclGetDevice(size_t id, EclDeviceType_t type, EclPlatform_t* platform, EclDevice_t** out);
 
+
+// additional wrappers
+#define out_of_memory_check(e, f)\
+e = f;\
+if(e == CL_OUT_OF_HOST_MEMORY || e == CL_OUT_OF_RESOURCES) return ECL_ERROR_OUT_OF_MEMORY
+
+
 /////////////////////////////////////////
 //           Implementation
 /////////////////////////////////////////
@@ -70,8 +86,8 @@ EclError_t eclGetDevice(size_t id, EclDeviceType_t type, EclPlatform_t* platform
 EclError_t eclGetPlatformsCount(size_t* out) {
     size_t count = 0;
 
-    cl_int err = clGetPlatformIDs(0, NULL, (cl_uint*)&count);
-    if(err == CL_OUT_OF_HOST_MEMORY) return ECL_ERROR_OUT_OF_MEMORY;
+    cl_int err;
+    out_of_memory_check(err, clGetPlatformIDs(0, NULL, (cl_uint*)&count));
 
     if(count == 0) return ECL_ERROR_NO_PLATFORMS;
 
@@ -100,11 +116,16 @@ void _eclGetDevicesArrayByType(EclDeviceType_t type, EclPlatform_t* platform, Ec
 EclError_t _eclGetDeviceByID(cl_device_id id, EclDevice_t* out) {
     out->_id = id;
 
-    cl_int err = clGetDeviceInfo(id, CL_DEVICE_NAME, ECL_MAX_STRING_LEN * sizeof(char), out->name, NULL);
-    if(err == CL_OUT_OF_HOST_MEMORY) return ECL_ERROR_OUT_OF_MEMORY;
+    cl_int err;
+    out_of_memory_check(err, clGetDeviceInfo(id, CL_DEVICE_NAME, ECL_MAX_STRING_LEN * sizeof(char), out->name, NULL));
+    out_of_memory_check(err, clGetDeviceInfo(id, CL_DEVICE_EXTENSIONS, ECL_MAX_STRING_LEN * sizeof(char), out->ext, NULL));
+    out_of_memory_check(err, clGetDeviceInfo(id, CL_DEVICE_VERSION, ECL_MAX_STRING_LEN * sizeof(char), out->ocl_ver, NULL));
 
-    err = clGetDeviceInfo(id, CL_DEVICE_EXTENSIONS, ECL_MAX_STRING_LEN * sizeof(char), out->ext, NULL);
-    if(err == CL_OUT_OF_HOST_MEMORY) return ECL_ERROR_OUT_OF_MEMORY;
+    out_of_memory_check(err, clGetDeviceInfo(id, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(size_t), &out->wrkgSize, NULL));
+    out_of_memory_check(err, clGetDeviceInfo(id, CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS, sizeof(size_t), &out->wrkiDim, NULL));
+    out_of_memory_check(err, clGetDeviceInfo(id, CL_DEVICE_MAX_WORK_ITEM_SIZES, out->wrkiDim * sizeof(size_t), out->wrkiSizes, NULL));
+
+    out_of_memory_check(err, clGetDeviceInfo(id, CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(size_t), &out->cu, NULL));
 
     return ECL_ERROR_OK;
 }
@@ -117,16 +138,14 @@ EclError_t _eclGetDevicesByType(EclDeviceType_t type, EclPlatform_t* platform) {
     // get devices count
     size_t count = 0;
     
-    cl_int err = clGetDeviceIDs(platform->_id, (cl_device_type)type, 0, NULL, (cl_uint*)&count);
-    if(err == CL_OUT_OF_HOST_MEMORY || err == CL_OUT_OF_RESOURCES) return ECL_ERROR_OUT_OF_MEMORY;
+    cl_int err;
+    out_of_memory_check(err, clGetDeviceIDs(platform->_id, (cl_device_type)type, 0, NULL, (cl_uint*)&count));
 
     if(count == 0) return ECL_ERROR_NO_DEVICES;
 
     // get devices id
     cl_device_id tmp[ECL_MAX_DEVICES_COUNT];
-    err = clGetDeviceIDs(platform->_id, (cl_device_type)type, count, tmp, NULL);
-
-    if(err == CL_OUT_OF_HOST_MEMORY || err == CL_OUT_OF_RESOURCES) return ECL_ERROR_OUT_OF_MEMORY;
+    out_of_memory_check(err, clGetDeviceIDs(platform->_id, (cl_device_type)type, count, tmp, NULL));
 
     // get devices
     *outSize = count;
@@ -149,22 +168,20 @@ EclError_t eclGetPlatform(size_t id, EclPlatform_t* out) {
 
     // get platform id
     cl_platform_id tmp[ECL_MAX_PLATFORMS_COUNT];
-    cl_uint tmpErr = clGetPlatformIDs(count, tmp, NULL);
-    if(tmpErr == CL_OUT_OF_HOST_MEMORY) return ECL_ERROR_OUT_OF_MEMORY;
+
+    cl_uint tmpErr;
+    out_of_memory_check(tmpErr, clGetPlatformIDs(count, tmp, NULL));
 
     out->_id = tmp[id];
 
     // get platform name
-    tmpErr = clGetPlatformInfo(out->_id, CL_PLATFORM_NAME, ECL_MAX_STRING_LEN * sizeof(char), out->name, NULL);
-    if(tmpErr == CL_OUT_OF_HOST_MEMORY) return ECL_ERROR_OUT_OF_MEMORY;
+    out_of_memory_check(tmpErr, clGetPlatformInfo(out->_id, CL_PLATFORM_NAME, ECL_MAX_STRING_LEN * sizeof(char), out->name, NULL));
 
     // get platform opencl version
-    tmpErr = clGetPlatformInfo(out->_id, CL_PLATFORM_VERSION, ECL_MAX_STRING_LEN * sizeof(char), out->ocl_ver, NULL);
-    if(tmpErr == CL_OUT_OF_HOST_MEMORY) return ECL_ERROR_OUT_OF_MEMORY;
+    out_of_memory_check(tmpErr, clGetPlatformInfo(out->_id, CL_PLATFORM_VERSION, ECL_MAX_STRING_LEN * sizeof(char), out->ocl_ver, NULL));
 
     // get platform extensions
-    tmpErr = clGetPlatformInfo(out->_id, CL_PLATFORM_EXTENSIONS, ECL_MAX_STRING_LEN * sizeof(char), out->ext, NULL);
-    if(tmpErr == CL_OUT_OF_HOST_MEMORY) return ECL_ERROR_OUT_OF_MEMORY;
+    out_of_memory_check(tmpErr, clGetPlatformInfo(out->_id, CL_PLATFORM_EXTENSIONS, ECL_MAX_STRING_LEN * sizeof(char), out->ext, NULL));
 
     // get platform devices
     err = _eclGetDevicesByType(ECL_DEVICE_CPU, out);
