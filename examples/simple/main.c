@@ -44,7 +44,13 @@ int main() {
         printf("%d\n", data[i]);
 
     // clean resources
+    eclBufferClear(&a);
+
     eclComputerClear(&gpu);
+    eclPlatformClear(&plat);
+
+    eclKernelClear(&kern);
+    eclProgramClear(&prog);
 
     return 0;
 }

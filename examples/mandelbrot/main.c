@@ -45,17 +45,17 @@ void mandelbrot_cpu(uint8_t* data, size_t w, size_t h, size_t maxIter) {
 }
 
 int main() {
-    size_t w = 2048;
-    size_t h = 1024;
-    size_t maxIter = 80;
+    size_t w = 8192;
+    size_t h = 4096;
+    size_t maxIter = 100;
 
-    uint8_t* data = malloc(2048 * 1024 * 3 * sizeof(uint8_t));
+    uint8_t* data = malloc(8192 * 4096 * 3 * sizeof(uint8_t));
 
     // cpu
     mandelbrot_cpu(data, w, h, maxIter);
     save_ppm("out_cpu.ppm", data, w, h);
 
-    memset(data, 0, 2048 * 1024 * 3 * sizeof(uint8_t));
+    memset(data, 0, 8192 * 4096 * 3 * sizeof(uint8_t));
 
     // gpu
     // setup program and kernel
@@ -117,7 +117,17 @@ int main() {
     save_ppm("out_gpu.ppm", data, w, h);
 
     // clean resources
+    eclBufferClear(&maxIterData);
+    eclBufferClear(&hData);
+    eclBufferClear(&wData);
+    eclBufferClear(&dataBuf);
+
     eclComputerClear(&gpu);
+    eclPlatformClear(&plat);
+
+    eclKernelClear(&kern);
+    eclProgramClear(&prog);
+
     free(data);
 
     return 0;

@@ -149,6 +149,7 @@ typedef struct {
 
 EclError_t eclGetPlatformsCount(size_t* out);
 EclError_t eclGetPlatform(size_t id, EclPlatform_t* out);
+EclError_t eclPlatformClear(EclPlatform_t* plat);
 
 size_t eclGetDevicesCount(EclDeviceType_t type, EclPlatform_t* platform);
 EclError_t eclGetDevice(size_t id, EclDeviceType_t type, EclPlatform_t* platform, EclDevice_t** out);
@@ -161,6 +162,10 @@ EclError_t eclComputerAwait(const EclComputer_t* comp);
 EclError_t eclComputerClear(EclComputer_t* comp);
 
 EclError_t eclProgramLoad(const char* filename, EclProgram_t* out);
+EclError_t eclProgramClear(EclProgram_t* prog);
+EclError_t eclKernelClear(EclKernel_t* kern);
+
+EclError_t eclBufferClear(EclBuffer_t* arg);
 
 
 // additional wrappers
@@ -524,5 +529,76 @@ EclError_t eclProgramLoad(const char* name, EclProgram_t* out) {
     return ECL_ERROR_OK;
 }
 
+EclError_t eclProgramClear(EclProgram_t* prog) {
+    cl_int err = 0;
+    for(size_t i = 0; i < prog->_progSize; i++) {
+        out_of_memory_check(err, clReleaseProgram(prog->_prog[i]._prog));
+
+        prog->_prog[i]._ctx = 0;
+        prog->_prog[i]._prog = 0;
+    }
+    prog->_progSize = 0;
+
+    return ECL_ERROR_OK;
+}
+
+EclError_t eclKernelClear(EclKernel_t* kern) {
+    cl_int err = 0;
+    for(size_t i = 0; i < kern->_kernSize; i++) {
+        out_of_memory_check(err, clReleaseKernel(kern->_kern[i]._kern));
+
+        kern->_kern[i]._prog = 0;
+        kern->_kern[i]._kern = 0;
+    }
+    kern->_kernSize = 0;
+
+    return ECL_ERROR_OK;
+}
+
+EclError_t eclBufferClear(EclBuffer_t* arg) {
+    cl_int err = 0;
+    for(size_t i = 0; i < arg->_bufSize; i++) {
+        out_of_memory_check(err, clReleaseMemObject(arg->_buf[i]._mem));
+
+        arg->_buf[i]._ctx = 0;
+        arg->_buf[i]._mem = 0;
+    }
+    arg->_bufSize = 0;
+
+    arg->data = NULL;
+    arg->size = 0;
+    arg->access = 0;
+
+    return ECL_ERROR_OK;
+}
+
+EclError_t _eclClearDevicesByType(EclDeviceType_t type, EclPlatform_t* platform) {
+    EclDevice_t* out = NULL;
+    size_t* outSize = NULL;
+    _eclGetDevicesArrayByType(type, platform, &out, &outSize);
+
+    cl_int err = 0;
+    for(size_t i = 0; i < *outSize; i++) {
+        out_of_memory_check(err, clReleaseDevice(out[i]._id));
+
+        memset(out + i, 0, sizeof(EclDevice_t));
+    }
+    *outSize = 0;
+
+    return ECL_ERROR_OK;
+}
+
+EclError_t eclPlatformClear(EclPlatform_t* plat) {
+    EclError_t err = _eclClearDevicesByType(ECL_DEVICE_CPU, plat);
+    if(err != ECL_ERROR_OK) return err;
+
+    err = _eclClearDevicesByType(ECL_DEVICE_GPU, plat);
+    if(err != ECL_ERROR_OK) return err;
+    
+    err = _eclClearDevicesByType(ECL_DEVICE_ACCEL, plat);
+    if(err != ECL_ERROR_OK) return err;
+
+    return ECL_ERROR_OK;
+}
 
 #endif // _EASY_CL_H_
