@@ -13,18 +13,18 @@ void save_ppm(const char* filename, const uint8_t* data, size_t w, size_t h) {
     fclose(f);
 }
 
-void mandelbrot_cpu(uint8_t* data, size_t w, size_t h, size_t maxIter) {
+void mandelbrot_cpu(uint8_t* data, uint32_t w, uint32_t h, float px, float py, float mag, uint32_t maxIter) {
     float aspect = w / h;
 
     for(int x = 0; x < w; x++) {
         for(int y = 0; y < h; y++) {
-            float i = ((float)x - w / 2) / (w / 4) - 0.65f;
-            float j = ((float)y - h / 2) / (h * aspect / 4);
+            float i = ((float)x - w / 2) / (mag * w / 4) - px;
+            float j = ((float)y - h / 2) / (mag * h * aspect / 4) - py;
 
             float oldI = i;
             float oldJ = j;
 
-            size_t k = 0;
+            uint32_t k = 0;
 
             for(; k < maxIter; k++) {
                 float a = i * i - j * j;
@@ -35,7 +35,7 @@ void mandelbrot_cpu(uint8_t* data, size_t w, size_t h, size_t maxIter) {
                 if(i * i + j * j > 4) break;
             }
 
-            size_t value = 255 * k / maxIter;
+            uint32_t value = 255 * k / maxIter;
 
             data[3 * (x + w * y)] = value;
             data[3 * (x + w * y) + 1] = value;
@@ -47,15 +47,19 @@ void mandelbrot_cpu(uint8_t* data, size_t w, size_t h, size_t maxIter) {
 int main() {
     uint32_t w = 8192;
     uint32_t h = 4096;
+
+    uint8_t* data = malloc(w * h * 3 * sizeof(uint8_t));
+
+    float px = 0.65f;
+    float py = 0;
+    float mag = 1.0f;
     uint32_t maxIter = 100;
 
-    uint8_t* data = malloc(8192 * 4096 * 3 * sizeof(uint8_t));
-
     // cpu
-    mandelbrot_cpu(data, w, h, maxIter);
+    mandelbrot_cpu(data, w, h, px, py, mag, maxIter);
     save_ppm("out_cpu.ppm", data, w, h);
 
-    memset(data, 0, 8192 * 4096 * 3 * sizeof(uint8_t));
+    memset(data, 0, w * h * 3 * sizeof(uint8_t));
 
     // gpu
     // setup program and kernel
@@ -75,7 +79,7 @@ int main() {
     EclBuffer_t dataBuf = {
         .data = data,
         .size = w * h * 3 * sizeof(uint8_t),
-        .access = ECL_BUFFER_READ_WRITE
+        .access = ECL_BUFFER_WRITE
     };
 
     // setup compute frame
@@ -86,9 +90,12 @@ int main() {
             {ECL_ARG_BUFFER, &dataBuf},
             {ECL_ARG_VAR, &w, sizeof(uint32_t)},
             {ECL_ARG_VAR, &h, sizeof(uint32_t)},
+            {ECL_ARG_VAR, &px, sizeof(float)},
+            {ECL_ARG_VAR, &py, sizeof(float)},
+            {ECL_ARG_VAR, &mag, sizeof(float)},
             {ECL_ARG_VAR, &maxIter, sizeof(uint32_t)}
         },
-        .argsCount = 4
+        .argsCount = 7
     };
 
     // compute
