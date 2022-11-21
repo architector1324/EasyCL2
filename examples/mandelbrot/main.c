@@ -45,9 +45,9 @@ void mandelbrot_cpu(uint8_t* data, size_t w, size_t h, size_t maxIter) {
 }
 
 int main() {
-    size_t w = 8192;
-    size_t h = 4096;
-    size_t maxIter = 100;
+    uint32_t w = 8192;
+    uint32_t h = 4096;
+    uint32_t maxIter = 100;
 
     uint8_t* data = malloc(8192 * 4096 * 3 * sizeof(uint8_t));
 
@@ -78,38 +78,21 @@ int main() {
         .access = ECL_BUFFER_READ_WRITE
     };
 
-    EclBuffer_t wData = {
-        .data = &w,
-        .size = sizeof(size_t),
-        .access = ECL_BUFFER_READ
-    };
-
-    EclBuffer_t hData = {
-        .data = &h,
-        .size = sizeof(size_t),
-        .access = ECL_BUFFER_READ
-    };
-
-    EclBuffer_t maxIterData = {
-        .data = &maxIter,
-        .size = sizeof(size_t),
-        .access = ECL_BUFFER_READ
-    };
-
     // setup compute frame
     EclFrame_t frame = {
         .prog = &prog,
         .kern = &kern,
-        .args = {&dataBuf, &wData, &hData, &maxIterData},
+        .args = {
+            {ECL_ARG_BUFFER, &dataBuf},
+            {ECL_ARG_VAR, &w, sizeof(uint32_t)},
+            {ECL_ARG_VAR, &h, sizeof(uint32_t)},
+            {ECL_ARG_VAR, &maxIter, sizeof(uint32_t)}
+        },
         .argsCount = 4
     };
 
     // compute
     eclComputerSend(&dataBuf, &gpu, ECL_EXEC_SYNC);
-    eclComputerSend(&wData, &gpu, ECL_EXEC_SYNC);
-    eclComputerSend(&hData, &gpu, ECL_EXEC_SYNC);
-    eclComputerSend(&maxIterData, &gpu, ECL_EXEC_SYNC);
-
     eclComputerGrid(&frame, (EclWorkSize_t){.dim = 2, .sizes={w, h}}, (EclWorkSize_t){.dim = 2, .sizes={256, 1}}, &gpu, ECL_EXEC_SYNC);
     eclComputerReceive(&dataBuf, &gpu, ECL_EXEC_SYNC);
 
@@ -117,9 +100,6 @@ int main() {
     save_ppm("out_gpu.ppm", data, w, h);
 
     // clean resources
-    eclBufferClear(&maxIterData);
-    eclBufferClear(&hData);
-    eclBufferClear(&wData);
     eclBufferClear(&dataBuf);
 
     eclComputerClear(&gpu);

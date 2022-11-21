@@ -18,20 +18,15 @@ int main() {
     eclComputer(0, ECL_DEVICE_GPU, &plat, &gpu);
 
     // setup data container
-    int data[12] = {};
-
-    EclBuffer_t a = {
-        .data = data,
-        .size = 12 * sizeof(float),
-        .access = ECL_BUFFER_READ_WRITE
-    };
+    ecl_array(int, a, 12, {}, ECL_BUFFER_READ_WRITE); // ecl::array<int> a[12] = {};
+    int b = 5;
 
     // setup compute frame
     EclFrame_t frame = {
         .prog = &prog,
         .kern = &kern,
-        .args = {&a},
-        .argsCount = 1
+        .args = {{ECL_ARG_BUFFER, &a}, {ECL_ARG_VAR, &b, sizeof(int)}},
+        .argsCount = 2
     };
 
     // 12 compute units combined into 3 groups
@@ -41,7 +36,7 @@ int main() {
 
     // output
     for(size_t i = 0; i < 12; i++)
-        printf("%d\n", data[i]);
+        printf("%d\n", ((const int*)a.data)[i]);
 
     // clean resources
     eclBufferClear(&a);

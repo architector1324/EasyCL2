@@ -42,6 +42,7 @@ typedef enum {
     ECL_ERROR_NO_COMPILER,
     ECL_ERROR_CREATE_KERNEL,
     ECL_ERROR_NO_KERNEL,
+    ECL_ERROR_INVALID_ARG_SIZE
 } EclError_t;
 
 typedef struct {
@@ -139,11 +140,22 @@ typedef struct {
     EclBufferAccess_t access;
 } EclBuffer_t;
 
+typedef enum {
+    ECL_ARG_VAR = 0,
+    ECL_ARG_BUFFER
+} EclFrameArgType_t;
+
+typedef struct {
+    EclFrameArgType_t type;
+    void* arg;
+    size_t size;
+} EclFrameArg_t;
+
 typedef struct {
     EclProgram_t* prog;
     EclKernel_t* kern;
 
-    EclBuffer_t* args[ECL_MAX_ARRAY_SIZE];
+    EclFrameArg_t args[ECL_MAX_ARRAY_SIZE];
     size_t argsCount;
 } EclFrame_t;
 
@@ -173,6 +185,7 @@ EclError_t eclBufferClear(EclBuffer_t* arg);
 e = f;\
 if(e == CL_OUT_OF_HOST_MEMORY || e == CL_OUT_OF_RESOURCES) return ECL_ERROR_OUT_OF_MEMORY
 
+#define ecl_array(type, name, _size, vals, _access) EclBuffer_t name = {.data = (type[_size])vals, .size = _size * sizeof(type), .access = _access}
 
 /////////////////////////////////////////
 //           Implementation
@@ -459,11 +472,16 @@ EclError_t eclComputerGrid(EclFrame_t* frame, EclWorkSize_t global, EclWorkSize_
     cl_int tmpErr = 0;
 
     for(size_t i = 0; i < frame->argsCount; i++) {
-        cl_mem mem = 0;
-        if(!_eclCheckBuffer(frame->args[i], comp, &mem)) return ECL_ERROR_BUFFER_NOT_SENDED;
+        if(frame->args[i].type == ECL_ARG_BUFFER) {
+            cl_mem mem = 0;
+            if(!_eclCheckBuffer((EclBuffer_t*)frame->args[i].arg, comp, &mem)) return ECL_ERROR_BUFFER_NOT_SENDED;
 
-        tmpErr = clSetKernelArg(kern, i, sizeof(cl_mem), &mem);
+            tmpErr = clSetKernelArg(kern, i, sizeof(cl_mem), &mem);
+        } else
+            tmpErr = clSetKernelArg(kern, i, frame->args[i].size, frame->args[i].arg);
+
         if(tmpErr == CL_OUT_OF_HOST_MEMORY || tmpErr == CL_OUT_OF_RESOURCES) return ECL_ERROR_OUT_OF_MEMORY;
+        if(tmpErr == CL_INVALID_ARG_SIZE) return ECL_ERROR_INVALID_ARG_SIZE;
     }
 
     tmpErr = clEnqueueNDRangeKernel(comp->_queue, kern, global.dim, NULL, global.sizes, local.sizes, 0, NULL, NULL);
