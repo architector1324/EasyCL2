@@ -2,6 +2,7 @@
 #define _EASYCL_H_
 
 #include <stdio.h>
+#include <string.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>

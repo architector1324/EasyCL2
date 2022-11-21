@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include <string.h>
 #include "easycl.h"
 
 
@@ -18,7 +17,7 @@ int main() {
     eclComputer(0, ECL_DEVICE_GPU, &plat, &gpu);
 
     // setup data container
-    ecl_array(int, a, 12, {}, ECL_BUFFER_READ_WRITE); // ecl::array<int> a[12] = {};
+    ecl_array(int, a, 12, {}, ECL_BUFFER_WRITE); // ecl::array<int> a[12] = {};
     int b = 5;
 
     // setup compute frame
